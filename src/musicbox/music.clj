@@ -6,93 +6,75 @@
         midi))
 
 (def *midi-out* (atom nil))
+
 (def _ \_)
 
 (defn skip? [x]
   (or (= x \_) (= x '_) (= x "_")))
 
-(defn note-action [note & {:keys [vel dur prob chan] :or {vel 60 dur 100 prob 100 chan 0}}]
-  (fn [_] (maybe prob midi-note @*midi-out* chan note vel dur)))
+(defn play-note
+  ([note] (play-note note nil))
+  ([note {:keys [vel dur chan] :or {vel 60 dur 100 chan 0}}]
+     (when (< note 128)
+       (midi-note @*midi-out* chan note vel dur))))
+
+(defn play-chord
+  ([chord] (play-chord chord nil))
+  ([chord args]
+     (doseq [note chord]
+       (play-note note args))))
+
+(defn note-action [note {prob :prob :or {prob 100} :as args}]
+  (fn [_] (maybe prob play-note note args)))
+
+(defn parse-pattern [pattern parser]
+  (letfn [(parse [s] (if (skip? s) {} (parser s)))]
+    (into [] (map parse pattern))))
 
 (defn note-name [n]
   (keyword (str "note" n)))
 
-(defn note-transform [num & args]
-  (if (skip? num) {}
-      {(note-name num) (apply note-action num args)}))
+(defn note-parser [args s]
+  (let [n (if (number? s) s (get-note s))]
+    {(note-name n) (note-action n args)}))
 
-(defn mono-stepper [transform pattern]
-  (into [] (map transform pattern)))
+(defn chord-parser [args c]
+  (into {} (map (p note-parser args) c)))
 
-(defn simple-stepper [pattern & args]
-  (let [transform (if args #(apply note-transform % args)
-                      #(note-transform %))]
-    (mono-stepper transform pattern)))
+(defn stepper [parser args pattern]
+  (parse-pattern pattern (p parser args)))
 
-;; (simple-stepper [60 61] :chan 1 :vel 10)
+(defn note-stepper [args pattern]
+  (stepper note-parser args pattern))
 
-(defn poly-stepper [])
-(defn beat-stepper [])
+(defn chord-stepper [args pattern]
+  (stepper chord-parser args pattern))
 
-(defn step->action [transform data step]
-  (let [step (transform step data)]
-    (into {} (map (fn [s] {(s :name) (apply note-action (s :note) (s :args))}) step))))
+(defn beat-stepper [args pattern]
+  (letfn [(transform [[n p]] (map  #(if (skip? %) % n) p))]
+    (into [] (apply map merge (map (fn [x] (note-stepper args (transform x))) pattern)))))
 
-(defn hit-transform [s data]
-  (if (skip? s) [{}]
-      (vector {:name (note-name (data :note))
-               :note (data :note)
-               :args [:chan (data :chan)]})))
-
-(defn hit->action [chan note step]
-  (step->action hit-transform {:chan chan :note note} step))
-
-(defn beat-stepper [chan m]
-  (letfn [(transform [[note stepper]]
-            (into [] (map (partial hit->action chan note) stepper)))]
-    (into [] (apply map merge (map transform m)))))
-
-(defn rand-beat-stepper
-  ([len] (rand-beat-stepper len "x_"))
+(defn rand-beat-pattern
+  ([len] (rand-beat-pattern len "x_"))
   ([len seed] (apply str (repeatedly len #(rand-nth seed)))))
 
-;;;;;;;;;
+(defn mode-note-parser [key mode octave args n]
+  (let [n (get-note key mode n octave)]
+    (note-parser args n)))
 
-(defn note-transform [s data]
-  (if (skip? s) [{}]
-      (vector {:name (note-name s)
-               :note s
-               :args [:chan (data :chan)]})))
+(defn mode-note-stepper [args key mode octave pattern]
+  (stepper (p mode-note-parser key mode octave) args pattern))
 
-(defn note->action [chan step]
-  (step->action note-transform {:chan chan} step))
+(defn mode-chord-parser [key mode octave args n]
+  (let [c (get-chord key mode n 4 octave)]
+    (chord-parser args c)))
 
-(defn mode-note-transform [s data]
-  (if (skip? s) [{}]
-      (let [note (note (data :key) (data :mode) s (data :octave))]
-        [{:name (note-name note)
-          :note note
-          :args [:chan (data :chan)]}])))
+(defn mode-chord-stepper [args key mode octave pattern]
+  (stepper (p mode-chord-parser key mode octave) args pattern))
 
-(defn mode-note->action [chan key mode octave m]
-  (step->action mode-note-transform {:chan chan :key key :mode mode :octave octave}))
+(defn arp-note-parser [chrd args step]
+  (let [n (nth chrd (mod step (count chrd)))]
+    (note-parser args n)))
 
-(defn note-stepper
-  ([chan m]
-      (into [] (map (partial note->action chan) m)))
-  ([chan key mode octave m]
-     (into [] (map (fn [s] (if (skip? s) {} (note->action chan [key mode s octave]))) m))))
-
-(defn chord->action [chan step]
-  (if (skip? step) {}
-      (let [notes (if (every? number? step) step (apply chord step))]
-        (apply merge {} (map (partial note->action chan) notes)))))
-
-(defn chord-stepper
-  ([chan m]
-     (into [] (map (partial chord->action chan) m)))
-  ([chan key mode octave m]
-     (into [] (map (fn [s] (if (skip? s) {} (chord->action chan [key mode (first s) (second s) octave]))) m))))
-
-(defn add-info-stepper []
-  (add-stepper :info :quarter [{:info #(println %)}]))
+(defn arp-stepper [args chrd pattern]
+  (stepper (p arp-note-parser chrd) args pattern))

@@ -10,18 +10,18 @@
       (.shutdown pool))
     new-pool))
 
-;; Not yet
-;; (defprotocol Tock
-;;   (clock-tick [this info]))
-;;;;;;;;;;
 
 (def clock-pool (atom (time/make-pool)))
 
-(def tick (atom 0))
+(def tick (atom -1))
 (def tocks (atom {}))
+(def pre-tocks (atom {}))
 
 (defn add-tock [name tock]
   (swap! tocks assoc name tock))
+
+(defn add-pre-tock [name pre-tock]
+  (swap! pre-tocks assoc name pre-tock))
 
 (defn remove-tock [name]
   (swap! tocks dissoc name))
@@ -29,25 +29,44 @@
 (defn add-tocks [tocks]
   (doseq [[name tock] tocks] (add-tock name tock)))
 
+(defn reset-tocks
+  ([] (reset! tocks {}))
+  ([tocks] (do (reset-tocks)
+               (add-tocks tocks))))
+
 (defn tick-tocks [msg]
   (doseq [[_ tock] @tocks]
 	(tock msg)))
 
+(defn tick-pre-tocks [msg]
+  (doseq [[_ tock] @pre-tocks]
+	(tock msg)))
+
 (defn tick-tock []
   (swap! tick inc)
-  (let [num @tick]
-	(tick-tocks
-	 (merge {:tick num}
-			(when (= (mod num 96) 0)
-			  {:whole (/ num 96)})
-			(when (= (mod num 48) 0)  
-			  {:half (/ num 48)})
-			(when (= (mod num 24) 0)
-			  {:quarter (/ num 24)})
-			(when (= (mod num 12) 0)
-			  {:eighth (/ num 12)})
-			(when (= (mod num  6) 0)
-			  {:sixteenth (/ num 6)})))))
+  (let [num @tick
+        info (merge {:tick num}
+                    (when (= (mod num 96) 0)
+                      {:whole (/ num 96)})
+                    (when (= (mod num 72) 0)
+                      {:d-half (/ num 72)})
+                    (when (= (mod num 48) 0)  
+                      {:half (/ num 48)})
+                    (when (= (mod num 36) 0)
+                      {:d-quarter (/ num 36)})
+                    (when (= (mod num 24) 0)
+                      {:quarter (/ num 24)})
+                    (when (= (mod num 12) 0)
+                      {:eighth (/ num 12)})
+                    (when (= (mod num  8) 0)
+                      {:triplet (/ num 8)})
+                    (when (= (mod num  6) 0)
+                      {:sixteenth (/ num 6)})
+                    (when (= (mod num 3) 0)
+                      {:thirtysecond (/ num 3)}))]
+    (do
+      (tick-pre-tocks info)
+      (tick-tocks info))))
 
 (defn stop-clock []
   (swap! clock-pool stop-and-reset-pool true))
@@ -60,11 +79,12 @@
 	(add-tocks (apply hash-map tocks))))
 
 (defn reset-clock []
-  (reset! tick 0))
+  (reset! tick -1))
 
 (defn reset-clock! []
   (reset-clock)
   (reset! tocks {})
+  (reset! pre-tocks {})
   (stop-clock))
 
 (defmulti midi-clock-in (fn [msg ts] (:status msg)))

@@ -1,23 +1,40 @@
 (ns musicbox.song
-  (:use musicbox.clock))
+  (:use musicbox.stepper
+        musicbox.clock
+        musicbox.theory
+        musicbox.utils
+        musicbox.music
+        musicbox.interactive
+        midi))
 
-(mk-pattern
- :sixteenth (midi-note ...)
- :quarter   (midi-note ...))
+(def stop-song reset-clock!)
 
+(defn song-change [song bar]
+  (when-let [bar-def (song bar)]
+    (println bar)
+    (when (bar-def :stop) (stop-song))
+    (when-let [b (bar-def :before)] (b))
+    (when-let [c (bar-def :chord)] (reset! master-chord c))
+    (when-let [k (bar-def :key)] (reset! master-key k))
+    (when-let [m (bar-def :mode)] (reset! master-mode m))
+    (when-let [r (bar-def :root)] (reset! master-root r))
+    (when-let [s (bar-def :steppers)] (add-steppers s true))
+    (when-let [a (bar-def :after)] (a))
+    (when-let [t (bar-def :tempo)] (start-clock t))
+    ))
 
-(mk-pattern 12 14 12 10)
+(defn play-song [song]
+  (do
+    (reset-clock!)
+    (add-stepper :song :quarter [{:song-change #(song-change song (% :num))}] true)
+    (add-info-stepper)
+    (song-change song 0)
+    ))
 
-(def song
-  {"1:1"  {:key :a
-		   :tempo 120
-		   :patterns #{:one :two}}
-   "5:1"  {:patterns #{:three :four}}
-   "9:1"  (song "1:1")
-   "17:1" {:patterns #{:five :six}}})
-
-(def pattern :sixteenth
-  [{...}
-   {...}
-   {...}
-   {...}])
+;; (def song
+;;   {1  {:key :a
+;;        :tempo 120
+;;        :steppers #{:one :two}}
+;;    4  {:steppers #{:three :four}}
+;;    7  (song 1)
+;;    10 {:steppers #{:five :six}}})

@@ -29,20 +29,28 @@
 (defn remove-actions [stepper step repeat-interval type action]
   (modify-actions stepper remove-action step repeat-interval type action))
 
-(defn call-actions [stepper step info]
+(defn call-actions [stepper step num info]
   (doseq [[k a] (stepper step)]
-	(a (conj info [:step step]))))
+	(a (merge info {:step step :num num}))))
 
 (defn clock-tick-fn [res stepper]
   (fn [tick-info]
     (when-let [num (tick-info res)]
       (let [step (mod num (count stepper))]
-        (call-actions stepper step tick-info)))))
+        (call-actions stepper step num tick-info)))))
 
 (defn mk-stepper [len mul] (vec (repeat (* len mul) {})))
 
-(defn add-stepper [name res stepper]
-  (add-tock name (clock-tick-fn res stepper)))
+(defn add-stepper
+  ([name res stepper] (add-stepper name res stepper false))
+  ([name res stepper pre]
+     (let [fun (if pre add-pre-tock add-tock)]
+       (fun name (clock-tick-fn res stepper)))))
+
+(defn add-steppers [steppers & reset]
+  (when (seq reset) (reset-tocks))
+  (doseq [s steppers]
+    (apply add-stepper s)))
 
 (defmacro add-stepper+ [stepper]
   `(add-stepper (keyword (quote ~stepper)) ~stepper))
@@ -51,3 +59,6 @@
 
 (defmacro remove-stepper+ [stepper]
   `(remove-stepper (keyword (quote ~stepper))))
+
+(defn add-info-stepper []
+  (add-stepper :info :quarter [{:info #(println %)}] true))
